@@ -1,0 +1,8 @@
+Hello,
+My name is John Smith. My output from my crashed job is here /fs/project/PYE1234/jsmith/rundir/slurm.out.
+
+
+Thanks,
+John Smith
+jsmith@osu.edu
+614-555-5555

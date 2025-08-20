@@ -1,0 +1,9 @@
+*.spacy
+*.json
+*.yaml
+plots/
+*.png
+__marimo__/
+packages/
+spacy_model/
+results/

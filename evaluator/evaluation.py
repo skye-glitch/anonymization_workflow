@@ -263,7 +263,7 @@ def _(dataset_aligned, datetime, evaluator, experiment, mo):
 def _(NOTEBOOK_DIR, basename, glob, mo, new_experiment_switch):
     csv_file = None
     if not new_experiment_switch.value:
-        csv_file = mo.ui.dropdown(options=[basename(csv) for csv in glob(f'{NOTEBOOK_DIR}/results/*.csv')], label = 'Result CSV file')
+        csv_file = mo.ui.dropdown(options=sorted([basename(csv) for csv in glob(f'{NOTEBOOK_DIR}/results/*.csv')], reverse=True), label = 'Result CSV file')
     csv_file
     return (csv_file,)
 
@@ -366,6 +366,36 @@ def _(capture_and_display_plotly, plotter):
 @app.cell
 def _(pprint, results):
     pprint({'PII F': results.pii_f, 'PII recall': results.pii_recall, 'PII precision': results.pii_precision})
+    return
+
+
+@app.cell
+def _(NOTEBOOK_DIR, experiment_timestamp, getcwd, move):
+    def move_plots():
+        run_dir = getcwd()
+        results_dir = f'{NOTEBOOK_DIR}/plots_{experiment_timestamp}'
+        move(f'{run_dir}/plots', results_dir)
+    return (move_plots,)
+
+
+@app.cell
+def _(NOTEBOOK_DIR, glob, mo):
+    def display_plots(csv_file):
+        timestamp = csv_file.split('.')[0].split('_')[1]
+        plot_dir = f'{NOTEBOOK_DIR}/plots_{timestamp}'
+        images = []
+        for imgfile in glob(f'{plot_dir}/*.png'):
+            images.append(mo.image(src=imgfile))
+        mo.output.append(mo.vstack(images))
+    return (display_plots,)
+
+
+@app.cell
+def _(csv_file, display_plots, move_plots, new_experiment_switch):
+    if new_experiment_switch.value:
+        move_plots()
+    else:
+        display_plots(csv_file.value)
     return
 
 

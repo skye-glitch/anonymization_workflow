@@ -15,7 +15,11 @@
 #     "spacy-transformers==1.3.9",
 #     "plotly==5.24.1",
 #     "ipython==9.4.0",
+#     "kaleido==0.2.1",
+#     # "en_helpdesktickets==0.1",
 # ]
+# [tool.uv.sources]
+# # en_helpdesktickets = { path = "../training/packages/en_helpdesktickets-0.1/dist/en_helpdesktickets-0.1-py3-none-any.whl", editable = true }
 # ///
 
 import marimo

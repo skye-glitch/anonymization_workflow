@@ -50,7 +50,7 @@ as well as the following entities predefined by presidio:
 - PERSON
 - LOCATION
 
-Code to debug your analyzer and test on sample text is available to aid in development.
+To aid in development, the notebook includes code to debug your analyzer and test on sample text.
 
 Once you are finished modifying the analyzer, you can `run` the `evaluator/evaluation.py` script to understand the analyzer.
 Postprocessing charts, dataframes, and metrics are available to help in understanding the results of the evaluation.
@@ -58,9 +58,10 @@ Note that you will need a json file or spacy doc containing annotated tickets fo
 
 If you determine that a spacy model trained on tickets from your center would improve the accuracy of your analyzer,
 `run` the `training/training.py` notebook to train a custom spacy model.
-After running `pip install` on your trained model, you should be able to edit the `model_name` in the `NlpEngineProvider` configuration in `analyzer/analyzer.py` to use this new model and re-`run` the evaluator to see how it performs.
+Open the `analyzer/analyzer.py` and `evaluator/evaluation.py` in a text editor and add the path to the wheel to the list of dependencies, this should install the package running the notebooks in sandbox mode. An example model whl is provided in the comments of the notebooks as an example.
+Then edit the `model_name` in the `NlpEngineProvider` configuration in `analyzer/analyzer.py` to use this new model and re-`run` the evaluator to see how it performs.
 
-Finally, once you are happy with your `analyzer`, you can `run` the `anonymizer/anonymizer.py` notebook to begin anonymizing and text files that contain PII.
+Finally, once you are happy with your `analyzer`, you can `run` the `anonymizer/anonymizer.py` notebook to begin anonymizing your text files.
 
 ## Missing files
 Some files are not included in this distribution as they contain to PII:

@@ -9,7 +9,10 @@
 #     "spacy==3.8.7",
 #     "spacy-curated-transformers==0.3.1",
 #     "spacy-transformers==1.3.9",
+#     #    "en_helpdesktickets==0.1",
 # ]
+# [tool.uv.sources]
+# # en_helpdesktickets = { path = "../training/packages/en_helpdesktickets-0.1/dist/en_helpdesktickets-0.1-py3-none-any.whl", editable = true }
 # ///
 
 import marimo

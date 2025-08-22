@@ -28,7 +28,7 @@ def _():
     from spacy.cli.train import train
     from spacy.cli.package import package
     from spacy.cli.download import download
-    return Path, glob, mo, pl, yaml
+    return Path, exists, glob, mo, pl, yaml
 
 
 @app.cell
@@ -60,10 +60,12 @@ def _(annotation_files, glob):
 def get_data(datafiles):
     import json
     data = []
-    for file in datafiles:
+    for file in sorted(datafiles):
         with open(file, 'r') as fp:
             j = json.load(fp)
         for annotation in j['annotations']:
+            if annotation[0] == '' or annotation[0] == '\n':
+                continue
             d = {}
             d['text'] = annotation[0]
             d['entities'] = [(int(e[0]), int(e[1]), e[2]) for e in annotation[1]['entities']]
@@ -119,10 +121,50 @@ def _(datafiles):
 
 
 @app.cell
-def _(NOTEBOOK_DIR, all_data, distribute_ids, yaml):
-    training, dev, test = distribute_ids(len(all_data), [0.8,0.1,0.1])
-    with open(f'{NOTEBOOK_DIR}/distribution.yaml', 'w') as _f:
-        yaml.dump({'training': training, 'dev': dev, 'test': test}, _f)
+def _(NOTEBOOK_DIR, exists, mo):
+    distribution_path = f'{NOTEBOOK_DIR}/distribution.yaml'
+    if exists(distribution_path):
+        existing_distribition = True
+    else:
+        existing_distrubition = False
+    old_dist_ui = mo.ui.switch(label='Use existing distribution', value=existing_distribition)
+    old_dist_ui
+    return distribution_path, old_dist_ui
+
+
+@app.cell
+def _(distribution_path, yaml):
+    def get_dist():
+        with open(distribution_path, 'r') as f:
+            dist = yaml.safe_load(f)
+            return dist['training'], dist['dev'], dist['test']
+    return (get_dist,)
+
+
+@app.cell
+def _(
+    all_data,
+    distribute_ids,
+    distribution_path,
+    exists,
+    get_dist,
+    mo,
+    old_dist_ui,
+    yaml,
+):
+    if old_dist_ui.value and exists(distribution_path):
+        mo.output.append(mo.md(f'Using distribution in {distribution_path}'))
+        training, dev, test = get_dist()
+    else:
+        mo.output.append(mo.md(f'Generating new distribution and writing to {distribution_path}'))
+        training, dev, test = distribute_ids(len(all_data), [0.8,0.1,0.1])
+        with open(distribution_path, 'w') as _f:
+            yaml.dump({'training': training, 'dev': dev, 'test': test}, _f)
+    return dev, test, training
+
+
+@app.cell
+def _(all_data, dev, test, training):
     training_data = [all_data[i] for i in training]
     dev_data = [all_data[i] for i in dev]
     test_data = [all_data[i] for i in test]
@@ -162,7 +204,7 @@ def _(pl):
         for label, d in dicts.items():
             data[label] = [d.get(k, 0) for k in all_keys]
 
-        df = pl.DataFrame(data)
+        df = pl.DataFrame(data, strict=False)
 
         return df
     return (get_df,)
@@ -175,6 +217,8 @@ def _(all_data, dev_data, get_df, mo, test_data, training_data):
     dev_dist = get_entity_distribution(dev_data)
     test_dist = get_entity_distribution(test_data)
     mo.vstack([
+        mo.md('**Count for each entity for the combined dataset and the training, dev, and test sets**'),
+        get_df(all=all_dist[0], training=training_dist[0], dev=dev_dist[0], test=test_dist[0]),
         mo.md('**Percentage of each entity for the combined dataset and the training, dev, and test sets**'),
         get_df(all=all_dist[1], training=training_dist[1], dev=dev_dist[1], test=test_dist[1])
     ])

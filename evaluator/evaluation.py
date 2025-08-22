@@ -142,13 +142,12 @@ def _(Span, nlp_engine, token_model_version):
     def docbin_to_dataset(doc_path):
         from presidio_evaluator import InputSample
         from spacy.tokens import DocBin
-        sentencizer = nlp_engine.nlp['en'].get_pipe('sentencizer')
         dataset = []
         docbin = DocBin().from_disk(doc_path)
         docs = list(docbin.get_docs(nlp_engine.nlp['en'].vocab))
         dataset = []
         for doc in docs:
-            doc = sentencizer(doc)
+            doc = nlp_engine.nlp['en'](doc)
             text = doc.text
             if text.strip() == '':
                 continue
@@ -221,7 +220,7 @@ def _(Evaluator, PresidioAnalyzerWrapper, dataset, get_entity_counts, pprint):
 @app.cell
 def _(
     Evaluator,
-    dataset,
+    dataset_aligned,
     entities_mapping,
     get_experiment_tracker,
     json,
@@ -235,7 +234,7 @@ def _(
     params = {'dataset_name': 'my_dataset', 'model_name': token_model_version}
     params.update(evaluator.model.to_log())
     experiment.log_parameters(params)
-    experiment.log_dataset_hash(dataset)
+    experiment.log_dataset_hash(dataset_aligned)
     experiment.log_parameter('entity_mappings', json.dumps(entities_mapping))
     return evaluator, experiment
 
@@ -281,20 +280,56 @@ def _(NOTEBOOK_DIR, getcwd, glob, makedirs, move):
 
 
 @app.cell
+def _():
+    def sentencized(dataset):
+        try:
+            sents = [sent for sent in dataset[0].tokens.sents]
+            return True
+        except:
+            return False
+
+    def get_sentence_for_row(row, dataset, df):
+        sentence_id = row['sentence_id']
+        sample = dataset[sentence_id]
+        doc = sample.tokens  # spaCy Doc
+        full_text = doc.text
+
+        # Get the token index in the doc (based on DataFrame position)
+        token_index = df[df['sentence_id'] == sentence_id].index.get_loc(row.name)
+        token = doc[token_index]
+
+        # Find the sentence span containing this token
+        try:
+            for sent in doc.sents:
+                if sent.start <= token.i < sent.end:
+                    return sent.text
+        except:
+            pass
+        return ''
+    return get_sentence_for_row, sentencized
+
+
+@app.cell
 def _(
     NOTEBOOK_DIR,
     csv_file,
+    datased_aligned,
+    dataset_aligned,
     evaluation_results,
     evaluator,
     experiment_timestamp,
+    get_sentence_for_row,
     mo,
     move_results,
     new_experiment_switch,
     pd,
+    sentencized,
 ):
     _msg = ''
     if new_experiment_switch.value:
         df = evaluator.get_results_dataframe(evaluation_results)
+        if sentencized(datased_aligned):
+            df['sentence'] = df.apply(lambda row: get_sentence_for_row(row, dataset_aligned, df), axis=1)
         df.to_csv(f'experiment_{experiment_timestamp}.csv')
         _msg += f'Wrote results to experiment_{experiment_timestamp}.csv'
     else:

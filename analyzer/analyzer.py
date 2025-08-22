@@ -96,7 +96,6 @@ def _(NlpEngineProvider):
 
     provider = NlpEngineProvider(nlp_configuration=configuration)
     nlp_engine = provider.create_engine()
-    _ = nlp_engine.nlp['en'].add_pipe('sentencizer')
     return (nlp_engine,)
 
 

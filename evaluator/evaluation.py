@@ -173,13 +173,6 @@ def _(dataset_path, docbin_to_dataset, mo):
     return (dataset,)
 
 
-@app.cell(hide_code=True)
-def _(mo, new_experiment_switch):
-    if new_experiment_switch.value:
-        mo.output.append(mo.md(r"""## Building Evaluator"""))
-    return
-
-
 @app.cell
 def _(Counter, Dict, InputSample, List):
     def get_entity_counts(dataset: List[InputSample]) -> Dict:
@@ -190,6 +183,19 @@ def _(Counter, Dict, InputSample, List):
                 entity_counter[tag] = entity_counter[tag] + 1
         return entity_counter
     return (get_entity_counts,)
+
+
+@app.cell
+def _(dataset, get_entity_counts, pprint):
+    pprint(get_entity_counts(dataset))
+    return
+
+
+@app.cell(hide_code=True)
+def _(mo, new_experiment_switch):
+    if new_experiment_switch.value:
+        mo.output.append(mo.md(r"""## Building Evaluator"""))
+    return
 
 
 @app.cell
@@ -313,7 +319,6 @@ def _():
 def _(
     NOTEBOOK_DIR,
     csv_file,
-    datased_aligned,
     dataset_aligned,
     evaluation_results,
     evaluator,
@@ -328,7 +333,7 @@ def _(
     _msg = ''
     if new_experiment_switch.value:
         df = evaluator.get_results_dataframe(evaluation_results)
-        if sentencized(datased_aligned):
+        if sentencized(dataset_aligned):
             df['sentence'] = df.apply(lambda row: get_sentence_for_row(row, dataset_aligned, df), axis=1)
         df.to_csv(f'experiment_{experiment_timestamp}.csv')
         _msg += f'Wrote results to experiment_{experiment_timestamp}.csv'

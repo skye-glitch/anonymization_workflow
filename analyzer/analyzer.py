@@ -110,6 +110,8 @@ def _():
         'PERSON',
         'LOCATION',
         # custom spacy entities
+        'PUBLIC_ADDRESS',
+        'ADDRESS',
         'USERNAME',
         'CLIENT_COMPANY_NAME',
         'PROJECT_NUMBER',
@@ -122,7 +124,7 @@ def _():
 
 @app.cell
 def _():
-    whitelisted_emails = ['oschelp@osc.edu', 'no-reply@osc.edu', 'l2support@osc.edu', 'splunk@osc.edu', 'slurm@osc.edu', 'security@osc.edu', 'webmaster@osc.edu']
+    whitelisted_emails = ['oschelp@osc.edu', 'no-reply@osc.edu', 'l2support@osc.edu', 'splunk@osc.edu', 'slurm@osc.edu', 'security@osc.edu', 'webmaster@osc.edu', 'oht-account_admin@osu.edu', 'oht-oscaccountadmin@osu.edu']
     return (whitelisted_emails,)
 
 
@@ -130,6 +132,18 @@ def _():
 def _():
     whitelisted_phonenumbers = ["6142921800"]
     return (whitelisted_phonenumbers,)
+
+
+@app.cell
+def _():
+    whitelisted_users = ['support', 'oschelp', 'xdmod']
+    return (whitelisted_users,)
+
+
+@app.cell
+def _():
+    whitelisted_addr = ['1224 Kinnear Rd', '1224 Kinnear Road']
+    return (whitelisted_addr,)
 
 
 @app.cell
@@ -148,12 +162,16 @@ def _():
 
 @app.cell
 def _(NOTEBOOK_DIR, csv):
-    def get_usernames(pth=f'{NOTEBOOK_DIR}/databases/usernames.csv'):
+    def get_usernames(deny_list=[], pth=f'{NOTEBOOK_DIR}/databases/usernames.csv'):
+        from spacy import load
+        from spacy.cli import download
+        download('en_core_web_sm')
+        basic_vocab = load('en_core_web_sm').vocab.strings
         with open(pth, 'r', errors='ignore') as f:
             csvreader = csv.reader(f)
             header = next(csvreader)
             #usernames = [row[header.index('Username')] for row in csvreader]
-            usernames = [row[0] for row in csvreader]
+            usernames = [row[0] for row in csvreader if (row[0] not in deny_list and row[0] not in basic_vocab)]
             usernames_lower = [user.lower() for user in usernames]
             return usernames, usernames_lower
     return (get_usernames,)
@@ -183,6 +201,7 @@ def _(NOTEBOOK_DIR, csv):
 
 @app.cell
 def _(
+    AnalysisExplanation,
     EntityRecognizer,
     List,
     NlpArtifacts,
@@ -191,12 +210,12 @@ def _(
     re,
 ):
     class UsernamesRecognizer(EntityRecognizer):
-        def __init__(self, deny_emails):
+        def __init__(self, deny_list, deny_emails):
             super().__init__(self)
             self.supported_entities=['USERNAME']
             self.deny_emails = deny_emails
-            self.usernames, self.usernames_lower = get_usernames()
-            self.keywords = ['user', 'users', 'username', 'usernames', '/', 'finger'] + self.usernames
+            self.usernames, self.usernames_lower = get_usernames(deny_list)
+            self.keywords = ['user', 'users', 'username', 'usernames', '/', 'finger'] + self.usernames_lower
 
 
         def load(self) -> None:
@@ -207,7 +226,6 @@ def _(
             self, text: str, entities: List[str], nlp_artifacts: NlpArtifacts
         ) -> List[RecognizerResult]:
             results = []
-            #print(f'nlp artifacts passed to username recognizer: <<<{nlp_artifacts.tokens.text}>>>')
             # iterate over the spaCy tokens
             for idx, token in enumerate(nlp_artifacts.tokens):
                 token_text = re.sub(r'^[^a-zA-Z0-9]+|[^a-zA-Z0-9]+$', '', token.text)
@@ -220,21 +238,41 @@ def _(
                     conf = 0.0
 
                 if match:
+                    additional_explanation = ''
                     if token.is_oov:
-                        conf = conf + 0.86
+                        conf = conf + 0.8
+                        additional_explanation = ' and is out-of-vocabulary'
                     elif nlp_artifacts.tokens[idx-1].text.lower() in self.keywords:
                         conf = conf + 0.5
+                        additional_explanation = f' and is preceded by a keyword {nlp_artifacts.tokens[idx-1]}'
                     elif [t.text for t in nlp_artifacts.tokens[min(idx+1, len(nlp_artifacts.tokens)-1):min(idx+5, len(nlp_artifacts.tokens)-1)]] == ['(', 'Additional', 'comments', ')']:
                         conf = conf + 0.9
-
+                        additional_explanation = f' and is followed by "(Additional comments)"'
                     result = RecognizerResult(
                         entity_type="USERNAME",
                         start=token.idx,
                         end=token.idx + len(token),
+                        analysis_explanation=AnalysisExplanation(recognizer=self.__class__.__name__,
+                                                                 original_score=conf,
+                                                                 textual_explanation=f'Token tagged as username since it matches a known username from username database{additional_explanation}'),
                         score=conf,
                     )
                     results.append(result)
-
+            
+                elif idx > 0 and [t.text for t in nlp_artifacts.tokens[min(idx+1, len(nlp_artifacts.tokens)-1):min(idx+5, len(nlp_artifacts.tokens)-1)]] == ['(', 'Additional', 'comments', ')'] and nlp_artifacts.tokens[idx-1].text == '-' and '@' not in token_text:
+                    conf = 0.9
+                    additional_explanation = ' and is followed by "(Additional comments)"'
+                    result = RecognizerResult(
+                        entity_type="USERNAME",
+                        start=token.idx,
+                        end=token.idx + len(token),
+                        analysis_explanation=AnalysisExplanation(recognizer=self.__class__.__name__,
+                                                                 original_score=conf,
+                                                                 textual_explanation=f'Token tagged as username since it matches a known username from username database{additional_explanation}'),
+                        score=conf,
+                    )
+                    results.append(result)
+            
                 if any(c in ['@', '/'] for c in token_text) and not any(c in token_text for c in self.deny_emails):
                     for m in re.finditer(r'[^@/]+', token.text):
                         sub = m.group()
@@ -243,6 +281,10 @@ def _(
                                 entity_type='USERNAME',
                                 start=token.idx + m.start(),
                                 end=token.idx + m.end(),
+                                analysis_explanation=AnalysisExplanation(recognizer=self.__class__.__name__,
+                                                                 original_score=0.7,
+                                                                 textual_explanation='Token tagged as username since it is prepended by special characters "/" or "@"'),
+
                                 score = 0.7
                             )
                             results.append(result)
@@ -253,6 +295,10 @@ def _(
                         entity_type="USERNAME",
                         start=token.idx,
                         end=token.idx + len(token),
+                                            analysis_explanation=AnalysisExplanation(recognizer=self.__class__.__name__,
+                                                                 original_score=0.5,
+                                                                 textual_explanation='Token tagged as username since it is identified as an OSU name.#'),
+
                         score=0.5,
                     )
                     results.append(result)
@@ -266,6 +312,10 @@ def _(
                                 entity_type='USERNAME',
                                 start = next_token.idx,
                                 end = next_token.idx + len(next_token),
+                                                    analysis_explanation=AnalysisExplanation(recognizer=self.__class__.__name__,
+                                                                 original_score=0.7,
+                                                                 textual_explanation='Token identified as username since it is identified as a social media account'),
+
                                 score=0.7
                             )
                             results.append(result)
@@ -327,6 +377,7 @@ def sanitize_token(token: str) -> str:
 
 @app.cell
 def instiutions_recognizer(
+    AnalysisExplanation,
     EntityRecognizer,
     List,
     NlpArtifacts,
@@ -341,6 +392,7 @@ def instiutions_recognizer(
             super().__init__(self)
             self.companies = get_clients()
             self.supported_entities=["CLIENT_COMPANY_NAME"]
+            self.keywords = ['inc', 'llc', 'co', 'ltd']
 
         def load(self) -> None:
             """No loading is required."""
@@ -360,14 +412,14 @@ def instiutions_recognizer(
 
                 # Check if the tokens appear in sequence in the text
                 for idx, token in enumerate(nlp_artifacts.tokens):
-                    if token.text.lower() == institution_tokens[0].lower():
+                    if token.text.lower() == institution_tokens[0].lower() or sanitize_token(token.text) == sanitize_token(institution_tokens[0]):
                         # Check if subsequent tokens match
                         match = True
                         score = self.expected_confidence_level
                         num_tokens = 1
                         for i, institution_token in enumerate(institution_tokens[1:], 1):
                             if idx + i >= len(nlp_artifacts.tokens) or sanitize_token(nlp_artifacts.tokens[idx + i].text) != sanitize_token(institution_token):
-                                if sanitize_token(institution_token) in ['inc', 'llc', 'co', 'ltd']:
+                                if sanitize_token(institution_token) in self.keywords:
                                     score = score - 0.1
                                     break
                                 else:
@@ -386,8 +438,32 @@ def instiutions_recognizer(
                                 start=start,
                                 end=end,
                                 score=score,
+                                analysis_explanation = AnalysisExplanation(recognizer=self.__class__.__name__, original_score=score, textual_explanation='Token contains a client company name from commercial client database')
                             )
                             results.append(result)
+                    elif token.text.lower().rstrip('.') in self.keywords:
+                        if idx > 0:
+                            start_idx = idx-1
+                            found_name = False
+                            while start_idx >= 0:
+                                tok = nlp_artifacts.tokens[start_idx]
+                                if tok.text.istitle():
+                                    found_name = True
+                                    start_idx = start_idx - 1
+                                elif tok.is_punct:
+                                    start_idx = start_idx - 1
+                                else:
+                                    start_idx = start_idx + 1
+                                    break
+                            if found_name:
+                                result = RecognizerResult(
+                                    entity_type="CLIENT_COMPANY_NAME",
+                                    start=nlp_artifacts.tokens[start_idx].idx,
+                                    end=token.idx + len(token.text),
+                                    score=0.5,
+                                    analysis_explanation = AnalysisExplanation(recognizer=self.__class__.__name__, original_score=0.5, textual_explanation='Token tagged as a company name since it contains a company keyword')
+                                )
+                                results.append(result)
 
             return results
     return (InstitutionsRecognizer,)
@@ -478,6 +554,7 @@ def _(EntityRecognizer, List, NlpArtifacts, RecognizerResult, re):
             super().__init__(self)
             self.keywords = ['access', 'code', 'passcode']
             self.supported_entities=['PASSWORD_CODE']
+            self.white_list = ['ABAQUS']
 
         def load(self) -> None:
             """No loading is required."""
@@ -494,7 +571,7 @@ def _(EntityRecognizer, List, NlpArtifacts, RecognizerResult, re):
 
             for m in pattern.finditer(text):
                 for idx, token in enumerate(nlp_artifacts.tokens):
-                    if token.idx == m.start() and token.text == m.group():
+                    if token.idx == m.start() and token.text == m.group() and token.text not in self.white_list:
                         if token.is_oov:
                             context = [t.text.lower() for t in nlp_artifacts.tokens[max(0, idx - 10):min(idx + 11,len(nlp_artifacts.tokens))]]
                             if any(t in self.keywords for t in context):
@@ -682,6 +759,48 @@ def _(EmailRecognizer, List, NlpArtifacts, RecognizerResult):
     return (myEmailRecognizer,)
 
 
+@app.cell
+def _(EntityRecognizer, List, NlpArtifacts, RecognizerResult, SpacyRecognizer):
+    class myLocationRecognizer(EntityRecognizer):
+        def __init__(self, public_list = []):
+            super().__init__(self)
+            self.public_keywords = ['college', 'university', 'institute']
+            self.public_list = public_list
+            self.supported_entities=["PUBLIC_ADDRESS", "ADDRESS"]
+
+        def load(self) -> None:
+            """No loading is required."""
+            pass
+
+        def analyze(
+            self, text: str, entities: List[str], nlp_artifacts: NlpArtifacts
+        ) -> List[RecognizerResult]:
+            results = []
+            location_results = SpacyRecognizer(supported_entities=['ADDRESS']).analyze(text, entities, nlp_artifacts)
+            for res in location_results:
+                lwindow = len(nlp_artifacts.tokens)-1
+                rwindow = 0
+                for idx, token in enumerate(nlp_artifacts.tokens):
+                    if token.idx >= res.start and token.idx + len(token.text) <= res.end:
+                        lwindow = min(lwindow, idx)
+                        rwindow = max(rwindow, idx)
+                context = [t.text.lower() for t in nlp_artifacts.tokens[max(0, lwindow - 10):rwindow]]
+                if any(addr in text[res.start:res.end] for addr in self.public_list):
+                    entity_type = 'PUBLIC_ADDRESS'
+                elif any(keyword in context for keyword in self.public_keywords):
+                    entity_type = 'PUBLIC_ADDRESS'
+                else:
+                    entity_type = 'ADDRESS'
+                myresult = RecognizerResult(
+                    entity_type = entity_type,
+                    start = res.start,
+                    end = res.end,
+                    score = res.score)
+                results.append(myresult)
+            return results
+    return (myLocationRecognizer,)
+
+
 @app.cell(hide_code=True)
 def _():
     mo.md(r"""## Add Recognizers to Analyzer""")
@@ -703,10 +822,13 @@ def _(
     myEmailWithQuestionMarks,
     myIpRecognizer,
     myIpwithQuestionMarkRecognizer,
+    myLocationRecognizer,
     myPhoneRecognizer,
     nlp_engine,
+    whitelisted_addr,
     whitelisted_emails,
     whitelisted_phonenumbers,
+    whitelisted_users,
 ):
     analyzer = AnalyzerEngine(
         nlp_engine=nlp_engine,
@@ -714,7 +836,7 @@ def _(
     )
 
 
-    analyzer.registry.add_recognizer(UsernamesRecognizer(deny_emails=whitelisted_emails))
+    analyzer.registry.add_recognizer(UsernamesRecognizer(deny_list=whitelisted_users, deny_emails=whitelisted_emails))
     analyzer.registry.add_recognizer(
         InstitutionsRecognizer()
     )
@@ -739,6 +861,7 @@ def _(
     )
     analyzer.registry.add_recognizer(myIpRecognizer())
     analyzer.registry.add_recognizer(myIpwithQuestionMarkRecognizer())
+    analyzer.registry.add_recognizer(myLocationRecognizer(whitelisted_addr))
     analyzer.registry.remove_recognizer("EmailRecognizer")
     for recognizer in analyzer.registry.recognizers:
         if not any(
@@ -760,7 +883,7 @@ def _(
 
     # Add back restricted spacy recognizer
     analyzer.registry.add_recognizer(
-        SpacyRecognizer(supported_entities=["PERSON", "ID", "NRP", "ADDRESS", "PUBLIC_URL_IP", "SECRET_URL_IP", "CLIENT_COMPANY_NAME", "CLIENT_NAME", "PUBLIC_ADDRESS", "LOCATION", "LOC"])
+        SpacyRecognizer(supported_entities=["PERSON", "ID", "NRP", "PUBLIC_URL_IP", "SECRET_URL_IP", "CLIENT_COMPANY_NAME", "CLIENT_NAME", "PUBLIC_ADDRESS", "LOCATION", "LOC"])
     )
     print(analyzer.registry.get_supported_entities())
     return (analyzer,)
@@ -774,6 +897,7 @@ def _(
     List,
     NlpArtifacts,
     RecognizerResult,
+    SpacyRecognizer,
     mimetypes,
     re,
 ):
@@ -788,9 +912,10 @@ def _(
             self.url_recognizer = UrlRecognizer()
             self.analyzer_engine = analyzer_engine
             self.entities_to_keep = internal_pii_list
-            self.entities_to_keep = [x for x in self.entities_to_keep if x not in ['PORT_NUMBER', 'SECRET_URL_IP', 'PUBLIC_URL_IP']]
+            self.entities_to_keep = [x for x in self.entities_to_keep if x not in ['PORT_NUMBER', 'SECRET_URL_IP', 'PUBLIC_URL_IP', 'URL_IP']]
             self.valid_extensions = [ext.lower() for ext in get('https://data.iana.org/TLD/tlds-alpha-by-domain.txt').text.split('\n')[1:]]
             self.file_exts = mimetypes.types_map.keys()
+            self.private_keywords = ['personal', 'pwd']
 
 
         def load(self) -> None:
@@ -831,9 +956,9 @@ def _(
             Analyzes text to find tokens which represent URLs
             """
             url_results = self.url_recognizer.analyze(text, ['URL'], nlp_artifacts=nlp_artifacts)
-            #print(f'url results: {url_results}')
+            spacy_results = SpacyRecognizer(supported_entities=["URL_IP"]).analyze(text, entities, nlp_artifacts)
             results = []
-            for url in url_results:
+            for url in url_results + spacy_results:
                 if self.is_part_of_email(text, url.start):
                     continue
                 if not self.valid_domain(text[url.start:url.end]):
@@ -848,7 +973,7 @@ def _(
                     entity_type = 'PUBLIC_URL_IP'
                     if 'osc.edu' in text[url.start:url.end]:
                         entity_type = self.handle_osc_urls(text[url.start:url.end])
-                    elif any(keyword in url_text for keyword in ['personal']):
+                    elif any(keyword in url_text for keyword in self.private_keywords):
                         entity_type = 'SECRET_URL_IP'
                 else:
                     score = 0.9
@@ -877,14 +1002,14 @@ def _():
 
 @app.cell
 def _():
-    test_text = mo.ui.text_area(value="Enter text here to test your analyzer", label='Test text: ')
+    test_text = mo.ui.text_area(value="Enter text here to test your analyzer", label='Test text: ',full_width=True)
     mo.md(f'{test_text}')
     return (test_text,)
 
 
 @app.cell
 def _(analyzer, test_text):
-    results = analyzer.analyze(test_text.value, language='en')
+    results = analyzer.analyze(test_text.value, language='en',return_decision_process=True)
     return (results,)
 
 
@@ -893,6 +1018,20 @@ def _(displacy, results, test_text):
     # Display analyzed text
     ents = [{"start": rt.start, "end": rt.end, "label": rt.entity_type} for rt in results]
     mo.md(displacy.render({'ents': ents, 'text': test_text.value, 'title': None}, style='ent', manual=True, jupyter=False))
+    return
+
+
+@app.cell
+def _(results, test_text):
+    tabular = []
+    for res in results:
+        try:
+            analysis_explanation = res.analysis_explanation.textual_explanation
+        except AttributeError:
+            analysis_explanation = 'N/A'
+        tabular.append({'String': test_text.value[res.start:res.end], 'Entity': res.entity_type, 'Score': res.score, 'Explanation': analysis_explanation})
+
+    mo.vstack([mo.md('### Explanation'), mo.ui.table(tabular)])
     return
 
 

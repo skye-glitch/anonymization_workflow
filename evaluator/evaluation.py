@@ -147,7 +147,6 @@ def _(Span, nlp_engine, token_model_version):
         docs = list(docbin.get_docs(nlp_engine.nlp['en'].vocab))
         dataset = []
         for doc in docs:
-            doc = nlp_engine.nlp['en'](doc)
             text = doc.text
             if text.strip() == '':
                 continue

@@ -1,0 +1,39 @@
+2025-08-27 9:36:18
+reply from: email2@center.edu
+
+The latest CUDA toolkit has been installed.
+
+-Jane
+
+2025-08-26 12:36:18
+reply from: richard.roe@company4.com
+
+Hello,
+
+Would it be possible to install the latest CUDA toolkit on the cluster?
+
+Thanks,
+Richard Roe
+CIO, Company4 Ltd.
+456 Elm Avenue
+Columbus, OH 43209
+
+<new_ticket>
+
+2025-08-22 08:02:03
+reply from: email3@center.edu
+
+After reviewing your jobs it seems to be an issue with the resources you requested. Please read http://www.center.edu/documentation/job-scripts and let me know if you have further questions.
+
+Best,
+Bob
+
+2025-08-21 18:02:57
+reply from: mpublic@university.edu
+
+Dear sir or madam,
+
+I submitted jobs 23523 and 23524 last week but they are still in the queue. Is there an issue with my account, username jpublic?
+
+Best,
+John Public

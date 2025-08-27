@@ -14,8 +14,8 @@ This workflow uses the [Presidio framework](https://microsoft.github.io/presidio
 This repository contains subdirectors for each of the components of the workflow.
 A marimo notebook is provide for each component.
 
-To start, install marimo package.
-marimo can easily be installed with pip or conda.
+To start, ensure that you have a package manager such as uv, pip, or conda and a python version 3.9 or greater.
+The marimo package can be easily installed with uv, pip, or conda.
 Follow the instructions [here](https://docs.marimo.io/getting_started/installation/) if you have any issues.
 
 
@@ -84,5 +84,6 @@ The spacy training pipeline assumes that the annotations are in
 
 ### annotation directory
 
-The annotation directory provides a notebook that can be used to take a set of annotated tickets, split them into training, dev, and sets and then convert them into spacy Doc files.
+The annotation directory provides a notebook, `convert.py` that can be used to take a set of annotated tickets, split them into training, dev, and sets and then convert them into spacy Doc files.
+We provide a text file containing a few sample tickets as well as a sample JSON file containing annotations in the expected format.
 The entire set of annotated tickets is also converted into a spacy Doc file if the annotated tickets will only be used for evaluation and not for the training of a new model.

@@ -10,7 +10,7 @@
 
 import marimo
 
-__generated_with = "0.14.17"
+__generated_with = "0.15.0"
 app = marimo.App(width="medium")
 
 
@@ -227,7 +227,14 @@ def _(all_data, dev_data, get_df, mo, test_data, training_data):
 
 @app.cell
 def _(mo):
-    mo.md(r"""### Write to Spacy File""")
+    write_button = mo.ui.run_button(label="Write to files")
+    write_button
+    return (write_button,)
+
+
+@app.cell
+def _(mo):
+    mo.md(r"""### Writing to Spacy File""")
     return
 
 
@@ -242,6 +249,7 @@ def _(NOTEBOOK_DIR, mo):
         for fname, data in data_list.items():
             mo.output.append(mo.md(f'Creating spacy DocBin object for {fname}'))
             nlp = blank('en')
+            nlp.add_pipe('sentencizer')
             doc_bin = DocBin()
             for datum in tqdm(data):
                 text = datum['text']
@@ -271,8 +279,21 @@ def _(NOTEBOOK_DIR, mo):
 
 
 @app.cell
-def _(all_data, dev_data, test_data, training_data, write_to_spacy_doc):
-    write_to_spacy_doc(all=all_data, training=training_data, dev=dev_data, test=test_data)
+def _(
+    all_data,
+    dev_data,
+    test_data,
+    training_data,
+    write_button,
+    write_to_spacy_doc,
+):
+    if write_button.value:
+        write_to_spacy_doc(all=all_data, training=training_data, dev=dev_data, test=test_data)
+    return
+
+
+@app.cell
+def _():
     return
 
 

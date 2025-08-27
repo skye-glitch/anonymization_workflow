@@ -1,0 +1,91 @@
+{
+  "classes": [
+    "ID_NUMBER",
+    "ETHNICITY",
+    "ADDRESS",
+    "PHONE_NUMBER",
+    "CLIENT_NAME",
+    "EMAIL_ADDRESS",
+    "SSN",
+    "USERNAME",
+    "PROJECT_NUMBER",
+    "CLIENT_COMPANY_NAME",
+    "PASSWORD_CODE",
+    "SECRET_URL_IP",
+    "PUBLIC_URL_IP",
+    "PORT_NUMBER",
+    "PUBLIC_ADDRESS",
+    "PUBLIC_LOCATION"
+  ],
+  "annotations": [
+    [
+      "2025-08-27 9:36:18\nreply from: email2@center.edu\n\nThe latest CUDA toolkit has been installed.\n\n-Jane\n\n2025-08-26 12:36:18\nreply from: richard.roe@company4.com\n\nHello,\n\nWould it be possible to install the latest CUDA toolkit on the cluster?\n\nThanks,\nRichard Roe\nCIO, Company4 Ltd.\n456 Elm Avenue\nColumbus, OH 43209\n\n",
+      {
+        "entities": [
+          [
+            31,
+            48,
+            "EMAIL_ADDRESS"
+          ],
+          [
+            96,
+            100,
+            "CLIENT_NAME"
+          ],
+          [
+            134,
+            158,
+            "EMAIL_ADDRESS"
+          ],
+          [
+            249,
+            260,
+            "CLIENT_NAME"
+          ],
+          [
+            266,
+            279,
+            "CLIENT_COMPANY_NAME"
+          ],
+          [
+            280,
+            313,
+            "ADDRESS"
+          ]
+        ]
+      }
+    ],
+    [
+      "\n\n2025-08-22 08:02:03\nreply from: email3@center.edu\n\nAfter reviewing your jobs it seems to be an issue with the resources you requested. Please read http://www.center.edu/documentation/job-scripts and let me know if you have further questions.\n\nBest,\nBob\n\n2025-08-21 18:02:57\nreply from: mpublic@university.edu\n\nDear sir or madam,\n\nI submitted jobs 23523 and 23524 last week but they are still in the queue. Is there an issue with my account, username jpublic?\n\nBest,\nJohn Public\n",
+      {
+        "entities": [
+          [
+            149,
+            196,
+            "PUBLIC_URL_IP"
+          ],
+          [
+            251,
+            254,
+            "CLIENT_NAME"
+          ],
+          [
+            288,
+            310,
+            "EMAIL_ADDRESS"
+          ],
+          [
+            452,
+            459,
+            "USERNAME"
+          ],
+          [
+            468,
+            479,
+            "CLIENT_NAME"
+          ]
+        ]
+      }
+    ]
+  ]
+}

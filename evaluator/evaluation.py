@@ -160,7 +160,8 @@ def _(Span, nlp_engine, token_model_version):
 def _(NOTEBOOK_DIR, mo, new_experiment_switch):
     dataset_path = None
     if new_experiment_switch.value:
-        dataset_path = mo.ui.text(value=f'{NOTEBOOK_DIR}/../annotation/dev.spacy', label='Annotated dataset path: ')
+        #dataset_path = mo.ui.text(value=f'{NOTEBOOK_DIR}/../annotation/dev.spacy', label='Annotated dataset path: ')
+        dataset_path = mo.ui.text(value=f'{NOTEBOOK_DIR}/../annotation/all.spacy', label='Annotated dataset path: ')
     dataset_path
     return (dataset_path,)
 
@@ -209,9 +210,10 @@ def _(Evaluator, PresidioAnalyzerWrapper, dataset, get_entity_counts, pprint):
     entities_mapping['CLIENT_COMPANY_NAME'] = 'CLIENT_COMPANY_NAME'
     entities_mapping['PASSWORD_CODE'] = 'PASSWORD_CODE'
     entities_mapping['ETHNICITY'] = 'NRP'
+    entities_mapping['LOCATION'] = 'LOCATION'
     entities_mapping['ADDRESS'] = 'LOCATION'
-    entities_mapping['PUBLIC_ADDRESS'] = 'PUBLIC_ADDRESS'
     entities_mapping['SSN'] = 'US_SSN'
+    entities_mapping['HEX_FINGERPRINT'] = 'HEX_FINGERPRINT'
     print("Using this mapping between the dataset and Presidio's entities:")
     pprint(entities_mapping, compact=True)
     dataset_aligned = Evaluator.align_entity_types(dataset, entities_mapping=entities_mapping)
@@ -454,8 +456,8 @@ def _(df, mapping, mo):
 
 @app.cell
 def _():
-    mapping = {'ADDRESS': 'LOCATION', 
-               'CLIENT_NAME': 'PERSON'}
+    mapping = {'ADDRESS': 'LOCATION',
+        'CLIENT_NAME': 'PERSON'}
     return (mapping,)
 
 

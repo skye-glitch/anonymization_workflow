@@ -42,6 +42,7 @@ def _():
     from presidio_analyzer.nlp_engine import NlpEngineProvider, NlpArtifacts, TransformersNlpEngine, NerModelConfiguration, NlpEngineProvider
     from presidio_analyzer.predefined_recognizers import SpacyRecognizer, PhoneRecognizer, EmailRecognizer, DateRecognizer, IpRecognizer
     from presidio_analyzer.context_aware_enhancers import LemmaContextAwareEnhancer
+    from presidio_analyzer import PatternRecognizer, Pattern
     import json
     import re
     import spacy
@@ -110,14 +111,14 @@ def _():
         'PERSON',
         'LOCATION',
         # custom spacy entities
-        'PUBLIC_ADDRESS',
         'ADDRESS',
         'USERNAME',
         'CLIENT_COMPANY_NAME',
         'PROJECT_NUMBER',
         'PASSWORD_CODE',
         'SECRET_URL_IP',
-        'PORT_NUMBER'
+        'PORT_NUMBER',
+        'HEX_FINGERPRINT',
     ]
     return (entities_to_keep,)
 
@@ -586,6 +587,242 @@ def _(EntityRecognizer, List, NlpArtifacts, RecognizerResult, re):
             return results
     return (PasswordCodeRecognizer,)
 
+ 
+@app.cell
+def _(EntityRecognizer, List, NlpArtifacts, RecognizerResult, re):
+    class HexFingerprintRecognizer(EntityRecognizer):
+        """
+        Recognizes colon-separated hex fingerprints commonly used for SSH/PKI:
+          - MD5:   (XX:){15}XX     -> 16 octets
+          - SHA-1: (XX:){19}XX     -> 20 octets
+          - SHA-256 (hex): (XX:){31}XX -> 32 octets (less common for SSH, but seen in logs/tools)
+
+        Notes:
+        - We avoid IPv6 false positives by matching ONLY fixed 2-hex pairs and exact group counts.
+        - Confidence is raised if context includes 'fingerprint', 'ssh', 'host key', or algorithm names.
+        """
+
+        def __init__(self):
+            super().__init__(self)
+            self.supported_entities = ['HEX_FINGERPRINT']
+
+            # Context keywords that strengthen the signal
+            self.keywords = [
+                'fingerprint', 'fp', 'ssh', 'host', 'hostkey', 'host-key',
+                'pubkey', 'public', 'key', 'auth', 'verify', 'known_hosts',
+                'sha1', 'sha-1', 'sha256', 'sha-256', 'md5','rsa'
+            ]
+
+            # Optional allowlist tokens (exact-token matches)
+            self.white_list = []
+
+            # Core patterns for colon-separated hex fingerprints (case-insensitive)
+            # Fixed-length 2-hex-digit groups only, to avoid IPv6.
+            pair = r'[A-Fa-f0-9]{2}'
+            self.md5_pat    = re.compile(rf'\b(?:{pair}:){{15}}{pair}\b')
+            self.sha1_pat   = re.compile(rf'\b(?:{pair}:){{19}}{pair}\b')
+            self.sha256_pat = re.compile(rf'\b(?:{pair}:){{31}}{pair}\b')
+
+            # Optional: OpenSSH SHA256 base64 style: 'SHA256:<base64>'
+            # base64_chars = r'[A-Za-z0-9+/]{8,}={0,2}'
+            # self.openssh_sha256_pat = re.compile(rf'\bSHA256:{base64_chars}\b')
+
+            # Aggregate for easy iteration
+            self.patterns = [
+                ('HEX_FINGERPRINT', self.md5_pat, 0.35),     # baseline score
+                ('HEX_FINGERPRINT', self.sha1_pat, 0.35),
+                ('HEX_FINGERPRINT', self.sha256_pat, 0.35),
+                # ('HEX_FINGERPRINT', self.openssh_sha256_pat, 0.35),
+            ]
+
+        def load(self) -> None:
+            """No loading is required."""
+            pass
+
+        def analyze(
+            self, text: str, entities: List[str], nlp_artifacts: NlpArtifacts
+        ) -> List[RecognizerResult]:
+            """
+            Find hex fingerprints and score them based on local context.
+            """
+            if 'HEX_FINGERPRINT' not in entities and '*' not in entities:
+                return []
+
+            results: List[RecognizerResult] = []
+
+            tokens = nlp_artifacts.tokens
+
+            
+            token_spans = [(t.idx, t.idx + len(t.text)) for t in tokens]
+
+            def token_index_covering_char(pos: int) -> int | None:
+                # Find the token whose span contains pos
+                # Linear scan is fine for log-sized texts; for large texts use bisect
+                for i, (s, e) in enumerate(token_spans):
+                    if s <= pos < e:
+                        return i
+                # If it falls between tokens (rare), pick the next token
+                for i, (s, _) in enumerate(token_spans):
+                    if s >= pos:
+                        return i
+                return None
+
+
+            # Iterate each pattern and collect matches
+            for entity_type, pattern, base_score in self.patterns:
+                for m in pattern.finditer(text):
+                    start, end = m.start(), m.end()
+                    matched_text = m.group()
+                    
+                    left_tok_i  = token_index_covering_char(start)
+                    right_tok_i = token_index_covering_char(end - 1)  # last char position
+
+                    if left_tok_i is None or right_tok_i is None:
+                        # Can't align to tokens at all; skip
+                        continue
+
+                   
+                    # Context window (10 tokens on either side)
+                    left = max(0, left_tok_i - 10)
+                    right = min(len(tokens), right_tok_i + 11)
+                    context_tokens = tokens[left:right]
+                    context_lower = [t.text.lower() for t in context_tokens]
+
+                    # Scoring heuristic:
+                    # - Base: 0.35 (format match)
+                    # - +0.25 if any strong keyword in context (fingerprint, ssh, host key, algos)
+                    # - +0.10 if token is OOV (often log-like tokens), minor nudge
+                    score = base_score
+                    if any(kw in context_lower for kw in self.keywords):
+                        score += 0.25
+                    if any(getattr(t, 'is_oov', False) for t in tokens[left_tok_i:right_tok_i + 1]):
+                        score += 0.10
+
+                    # Clamp to [0,1]
+                    score = max(0.0, min(1.0, score))
+
+                    results.append(
+                        RecognizerResult(
+                            entity_type=entity_type,
+                            start=start,
+                            end=end,
+                            score=score
+                        )
+                    )
+
+            return results
+
+    return (HexFingerprintRecognizer,)
+
+@app.cell
+def _(EntityRecognizer, List, NlpArtifacts, RecognizerResult, re):
+    class myAddressRecognizer(EntityRecognizer):
+        def __init__(self):
+            super().__init__(self)
+            self.supported_entity = 'ADDRESS'
+            self.supported_entities = [self.supported_entity]
+
+
+        def load(self) -> None:
+            """No loading is required."""
+            pass
+
+        
+        def analyze(
+                self, text: str, entities: List[str], nlp_artifacts: NlpArtifacts
+            ) -> List[RecognizerResult]:
+                results = []
+                # Pattern 0: Standard US address
+                
+                standard_address_pattern = re.compile(
+                    r"""
+                    # Optional recipient/person name line
+                    ^(?:[A-Z][\w'.-]+(?:\s+[A-Z][\w'.-]+)*\s*\n)?
+                    # Building / room / hall etc., e.g., "284 Research Hall"
+                    \d{1,6}\s+[A-Za-z0-9&'().\- ]+?
+                    # Optional: comma & Mail Stop code, e.g., ", Mail Stop 6C5"
+                    (?:\s*,\s*Mail\s*Stop\s*[\w-]+)?
+                    # Soft separator that tolerates: commas, spaces, optional newline,
+                    # or even no delimiter if the next token begins with a capital letter.
+                    (?:[,\s]*\n?[,\s]*|(?=[A-Z]))
+                    # Optional organization line (e.g., "George Mason University")
+                    (?:[A-Z][A-Za-z0-9&'().\- ]+(?:\s+[A-Z][A-Za-z0-9&'().\- ]+)*)
+                    # Soft separator again before street
+                    (?:[,\s]*\n?[,\s]*|(?=[A-Z]))?
+                    # Street address: "4400 University Drive"
+                    \d{1,6}\s+[A-Za-z0-9&'().\- ]+
+                    (?:\s(?:Street|St|Avenue|Ave|Road|Rd|Boulevard|Blvd|Lane|Ln|Drive|Dr))?\b\.?
+                    # Separator before city/state
+                    (?:[,\s]*\n?[,\s]*|(?=[A-Z]))?
+                    # City, State ZIP (ZIP+4 optional)
+                    [A-Za-z .'\-]+,\s*[A-Z]{2}\s*\d{5}(?:-\d{4})?
+                    # Optional country
+                    (?:[,\s]*\n?[,\s]*\b(?:USA|United\s+States)\b)?
+                    """,
+                    re.MULTILINE
+                )
+
+
+                # Pattern 1: Internal campus-style address
+                internal_address_pattern = re.compile(
+                    r"""
+                    \b
+                    \d{1,5}                          # 284
+                    \s+
+                    [\w .'-]+?                       # Research Hall
+                    \s*,?\s*                         # optional comma/space
+                    Mail\s+Stop\s+
+                    [A-Za-z0-9]{1,6}                 # 6C5
+                    \b
+                    """,
+                    re.IGNORECASE | re.VERBOSE
+                )
+
+
+                # Pattern 2: University-style address
+                
+                university_address_pattern = re.compile(
+                    r"""
+                    \b
+                    \d{1,6}                           # 4400
+                    \s+
+                    [A-Za-z0-9 .'-]+?                 # University Drive (or similar)
+                    (?:,?\s*|)                        # allow optional delimiter *or none*
+                    [A-Za-z .'-]+                     # City (e.g., Fairfax)
+                    \s*,?\s*
+                    [A-Z]{2}                          # State (VA)
+                    \s+
+                    \d{5}(?:-\d{4})?                  # ZIP
+                    (?:\s+USA|\s+United\s+States)?    # optional country
+                    \b
+                    """,
+                    re.IGNORECASE | re.VERBOSE
+                )
+
+
+
+
+                # Pattern 3: Box address (e.g., Box 352700)
+                box_address_pattern = re.compile(
+                    r"Box\s\d{3,6}",  # e.g., Box 352700
+                    re.IGNORECASE
+                )
+
+
+                for pattern in [standard_address_pattern, internal_address_pattern, university_address_pattern, box_address_pattern]:
+                    for m in pattern.finditer(text):
+                        result = RecognizerResult(
+                            entity_type='ADDRESS',
+                            start=m.start(),
+                            end=m.end(),
+                            score=0.7
+                        )
+                        results.append(result)
+                return results
+        
+        def get_supported_entities(self):
+            return [self.supported_entity]
+    return (myAddressRecognizer,)
 
 @app.cell
 def _(EntityRecognizer, List, NlpArtifacts, RecognizerResult, mimetypes, re):
@@ -688,6 +925,17 @@ def _(List, NlpArtifacts, PhoneRecognizer, RecognizerResult, re):
                 return True
             return False
 
+        
+        def is_timestamp(self, text: str, index: int) -> bool:
+            # Extract the substring that was matched
+            match_text = text[index:index+10]
+            if match_text.isdigit():
+                ts = int(match_text)
+                # Typical UNIX timestamp range: 2015 to ~2030
+                return 1420070400 <= ts <= 1924991999
+            return False
+
+
         def phone_match(self, substr: str, numbers: list):
             normalized_substr = re.sub(r'\D', '', substr)
             return any(number in normalized_substr for number in numbers)
@@ -703,6 +951,7 @@ def _(List, NlpArtifacts, PhoneRecognizer, RecognizerResult, re):
                 #if text[r.start:r.end] not in self.denylist
                 if not self.phone_match(text[r.start:r.end], self.denylist)
                 and not self.is_time(text, r.start)
+                and not self.is_timestamp(text, r.start)
             ]
             return filtered
     return (myPhoneRecognizer,)
@@ -759,46 +1008,7 @@ def _(EmailRecognizer, List, NlpArtifacts, RecognizerResult):
     return (myEmailRecognizer,)
 
 
-@app.cell
-def _(EntityRecognizer, List, NlpArtifacts, RecognizerResult, SpacyRecognizer):
-    class myLocationRecognizer(EntityRecognizer):
-        def __init__(self, public_list = []):
-            super().__init__(self)
-            self.public_keywords = ['college', 'university', 'institute']
-            self.public_list = public_list
-            self.supported_entities=["PUBLIC_ADDRESS", "ADDRESS"]
 
-        def load(self) -> None:
-            """No loading is required."""
-            pass
-
-        def analyze(
-            self, text: str, entities: List[str], nlp_artifacts: NlpArtifacts
-        ) -> List[RecognizerResult]:
-            results = []
-            location_results = SpacyRecognizer(supported_entities=['ADDRESS']).analyze(text, entities, nlp_artifacts)
-            for res in location_results:
-                lwindow = len(nlp_artifacts.tokens)-1
-                rwindow = 0
-                for idx, token in enumerate(nlp_artifacts.tokens):
-                    if token.idx >= res.start and token.idx + len(token.text) <= res.end:
-                        lwindow = min(lwindow, idx)
-                        rwindow = max(rwindow, idx)
-                context = [t.text.lower() for t in nlp_artifacts.tokens[max(0, lwindow - 10):rwindow]]
-                if any(addr in text[res.start:res.end] for addr in self.public_list):
-                    entity_type = 'PUBLIC_ADDRESS'
-                elif any(keyword in context for keyword in self.public_keywords):
-                    entity_type = 'PUBLIC_ADDRESS'
-                else:
-                    entity_type = 'ADDRESS'
-                myresult = RecognizerResult(
-                    entity_type = entity_type,
-                    start = res.start,
-                    end = res.end,
-                    score = res.score)
-                results.append(myresult)
-            return results
-    return (myLocationRecognizer,)
 
 
 @app.cell(hide_code=True)
@@ -812,7 +1022,9 @@ def _(
     AnalyzerEngine,
     InstitutionsRecognizer,
     PasswordCodeRecognizer,
+    HexFingerprintRecognizer,
     PortNumberRecognizer,
+    myAddressRecognizer,
     ProjectsRecognizer,
     SpacyRecognizer,
     UsernamesRecognizer,
@@ -822,7 +1034,6 @@ def _(
     myEmailWithQuestionMarks,
     myIpRecognizer,
     myIpwithQuestionMarkRecognizer,
-    myLocationRecognizer,
     myPhoneRecognizer,
     nlp_engine,
     whitelisted_addr,
@@ -844,9 +1055,13 @@ def _(
         ProjectsRecognizer()
     )
     analyzer.registry.add_recognizer(PasswordCodeRecognizer())
+    analyzer.registry.add_recognizer(HexFingerprintRecognizer())
     analyzer.registry.add_recognizer(
         PortNumberRecognizer(supported_entities=["PORT_NUMBER"])
     )
+    analyzer.registry.add_recognizer(
+        myAddressRecognizer()
+        )
     analyzer.registry.add_recognizer(
         myPhoneRecognizer(
             supported_entities=["PHONE_NUMBER"], denylist=whitelisted_phonenumbers
@@ -861,7 +1076,6 @@ def _(
     )
     analyzer.registry.add_recognizer(myIpRecognizer())
     analyzer.registry.add_recognizer(myIpwithQuestionMarkRecognizer())
-    analyzer.registry.add_recognizer(myLocationRecognizer(whitelisted_addr))
     analyzer.registry.remove_recognizer("EmailRecognizer")
     for recognizer in analyzer.registry.recognizers:
         if not any(
@@ -883,7 +1097,7 @@ def _(
 
     # Add back restricted spacy recognizer
     analyzer.registry.add_recognizer(
-        SpacyRecognizer(supported_entities=["PERSON", "ID", "NRP", "PUBLIC_URL_IP", "SECRET_URL_IP", "CLIENT_COMPANY_NAME", "CLIENT_NAME", "PUBLIC_ADDRESS", "LOCATION", "LOC"])
+        SpacyRecognizer(supported_entities=["PERSON", "ID", "NRP", "PUBLIC_URL_IP", "SECRET_URL_IP", "CLIENT_COMPANY_NAME", "CLIENT_NAME", "ADDRESS", "LOCATION", "LOC"])
     )
     print(analyzer.registry.get_supported_entities())
     return (analyzer,)
@@ -936,7 +1150,12 @@ def _(
                 substr = ''
             if EmailRecognizer().analyze(substr, ['EMAIL_ADDRESS']) != []:
                 return True
-            return False     
+            return False    
+        
+        def _is_hex_fingerprint(self, s: str, index: int, nlp_artifacts: NlpArtifacts) -> bool:
+            if HexFingerprintRecognizer().analyze(s, ['HexFingerprint'], nlp_artifacts) != []:
+                return True
+ 
 
         def valid_domain(self, url: str) -> bool:
             #parsed = urlparse(url if url.startswith("http") else "http://" + url)
@@ -960,6 +1179,8 @@ def _(
             results = []
             for url in url_results + spacy_results:
                 if self.is_part_of_email(text, url.start):
+                    continue
+                if self._is_hex_fingerprint(text, url.start, nlp_artifacts):
                     continue
                 if not self.valid_domain(text[url.start:url.end]):
                     continue

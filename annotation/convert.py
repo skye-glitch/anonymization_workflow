@@ -124,10 +124,10 @@ def _(datafiles):
 def _(NOTEBOOK_DIR, exists, mo):
     distribution_path = f'{NOTEBOOK_DIR}/distribution.yaml'
     if exists(distribution_path):
-        existing_distribition = True
+        existing_distribution = True
     else:
-        existing_distrubition = False
-    old_dist_ui = mo.ui.switch(label='Use existing distribution', value=existing_distribition)
+        existing_distribution = False
+    old_dist_ui = mo.ui.switch(label='Use existing distribution', value=existing_distribution)
     old_dist_ui
     return distribution_path, old_dist_ui
 
@@ -257,6 +257,12 @@ def _(NOTEBOOK_DIR, mo):
                 doc = nlp.make_doc(text)
                 ents = []
                 for start, end, label in labels:
+                    n = len(text)
+                    if start < 0 or end < 0 or start > n or end > n:
+                        print(f"Clamping out-of-bounds entity: ({start}, {end}, {label}) for text length {n}")
+                        start = max(0, min(start, n))
+                        end = max(0, min(end, n))
+
                     while text[start] in [' ', '\n', '\r']:
                         start = start + 1
                     while text[end-1] in [' ', '\n', '\r']:
